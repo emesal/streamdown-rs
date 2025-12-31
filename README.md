@@ -2,6 +2,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/vd9KdeVT)
 
 A streaming markdown renderer for modern terminals, written in Rust.
 
@@ -24,7 +25,7 @@ This is a Rust port of [Streamdown](https://github.com/kristopolous/Streamdown) 
 ### From source
 
 ```bash
-git clone https://github.com/yourusername/streamdown-rs.git
+git clone https://github.com/fed-stew/streamdown-rs.git
 cd streamdown-rs
 cargo install --path .
 ```

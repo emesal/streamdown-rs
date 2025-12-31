@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Syntax highlighting for streamdown via syntect"
+readme = "README.md"
 
 [dependencies]
 streamdown-core.workspace = true

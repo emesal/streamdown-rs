@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Plugin system for streamdown extensibility"
+readme = "README.md"
 
 [dependencies]
 streamdown-core.workspace = true

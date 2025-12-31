@@ -15,7 +15,7 @@ use std::path::PathBuf;
     author = "Streamdown Contributors",
     version,
     about = "A streaming markdown renderer for modern terminals",
-    after_help = "Repository: https://github.com/streamdown/streamdown-rs\n\n\
+    after_help = "Repository: https://github.com/fed-stew/streamdown-rs\n\n\
                   Examples:\n  \
                   cat README.md | sd\n  \
                   sd document.md\n  \

@@ -123,5 +123,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `directories` 5.0 - XDG paths
 - `nix` 0.29 - Unix PTY (Unix only)
 
-[Unreleased]: https://github.com/yourusername/streamdown-rs/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/yourusername/streamdown-rs/releases/tag/v0.1.0
+[Unreleased]: https://github.com/fed-stew/streamdown-rs/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/fed-stew/streamdown-rs/releases/tag/v0.1.0

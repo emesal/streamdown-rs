@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Configuration loading and management for streamdown"
+readme = "README.md"
 
 [dependencies]
 streamdown-core.workspace = true
