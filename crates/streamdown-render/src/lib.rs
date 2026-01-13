@@ -34,7 +34,7 @@ pub mod list;
 pub mod table;
 pub mod text;
 
-pub use code::{CodeBlockState, CODEPAD_BOTTOM, CODEPAD_TOP};
+pub use code::{code_wrap, CodeBlockState, CODEPAD_BOTTOM, CODEPAD_TOP};
 pub use features::{
     copy_to_clipboard, is_tty, savebrace, savebrace_clear, savebrace_last,
     savebrace_path, savebrace_read, terminal_size, terminal_width, RenderFeatures,

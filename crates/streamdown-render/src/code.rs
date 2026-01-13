@@ -235,7 +235,7 @@ pub fn render_code_end(
 ///
 /// # Arguments
 /// * `text` - The code line
-/// * `width` - Maximum width
+/// * `width` - Maximum width (in characters, not bytes)
 /// * `pretty_broken` - If false, don't wrap (let terminal handle it)
 ///
 /// # Returns
@@ -251,8 +251,8 @@ pub fn code_wrap(text: &str, width: usize, pretty_broken: bool) -> (usize, Vec<S
         return (0, vec![text.to_string()]);
     }
 
-    // Detect indentation
-    let indent = text.len() - text.trim_start().len();
+    // Detect indentation (count leading whitespace characters, not bytes)
+    let indent = text.chars().take_while(|c| c.is_whitespace()).count();
     let content = text.trim_start();
 
     if content.is_empty() {
@@ -261,24 +261,27 @@ pub fn code_wrap(text: &str, width: usize, pretty_broken: bool) -> (usize, Vec<S
 
     // Calculate effective width (accounting for indent on continuation lines)
     let effective_width = width.saturating_sub(4).saturating_sub(indent);
+    let content_char_count = content.chars().count();
 
-    if effective_width == 0 || content.len() <= effective_width {
+    if effective_width == 0 || content_char_count <= effective_width {
         return (indent, vec![text.to_string()]);
     }
 
-    // Wrap the content
+    // Wrap the content using character indices (not byte indices)
+    // This is critical for UTF-8 safety with multi-byte characters
     let mut lines = Vec::new();
+    let chars: Vec<char> = content.chars().collect();
     let mut start = 0;
 
-    while start < content.len() {
-        let end = (start + effective_width).min(content.len());
-        let line = &content[start..end];
+    while start < chars.len() {
+        let end = (start + effective_width).min(chars.len());
+        let line: String = chars[start..end].iter().collect();
 
         if start == 0 {
             // First line includes original indentation
             lines.push(format!("{}{}", " ".repeat(indent), line));
         } else {
-            lines.push(line.to_string());
+            lines.push(line);
         }
 
         start = end;
@@ -387,5 +390,95 @@ mod tests {
             state.raw_code(),
             "fn main() {\n    println!(\"Hello\");\n}"
         );
+    }
+
+    #[test]
+    fn test_code_wrap_multibyte_utf8_characters() {
+        // '═' is 3 bytes (U+2550). Buggy byte-based slicing at position 36 would
+        // land inside a character, causing: "byte index 36 is not a char boundary"
+        let line = "//  ═══════════════════════════════════════════════════════════════════════════";
+
+        let (_, lines) = code_wrap(line, 40, true);
+
+        assert!(lines.len() >= 1);
+        for line in &lines {
+            assert!(line.chars().count() > 0 || line.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_code_wrap_multibyte_indent_detection() {
+        // '　' (fullwidth space, U+3000) is 3 bytes. Indent should be 2 chars, not 6 bytes.
+        let line = "　　code";
+
+        let (indent, _) = code_wrap(line, 80, true);
+
+        assert_eq!(indent, 2);
+    }
+
+    #[test]
+    fn test_code_wrap_emoji_byte_boundary() {
+        // 🎉 is 4 bytes. With width=20 (effective=16), buggy code slices at byte 16,
+        // which is inside the 4th emoji, causing a panic.
+        let line = "x🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉";
+        assert_eq!(line.len(), 81);
+        assert_eq!(line.chars().count(), 21);
+
+        let (indent, lines) = code_wrap(line, 20, true);
+
+        assert_eq!(indent, 0);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].chars().count(), 16);
+        assert_eq!(lines[1].chars().count(), 5);
+    }
+
+    #[test]
+    fn test_code_wrap_zwj_emoji() {
+        // 👨‍💻 = 11 bytes, 3 code points. Byte-based slicing corrupts ZWJ sequences.
+        let line = format!("// {}", "👨‍💻".repeat(10));
+        assert_eq!(line.chars().count(), 33);
+
+        let (_, lines) = code_wrap(&line, 20, true);
+
+        assert!(lines.len() >= 2);
+        for line in &lines {
+            assert!(line.chars().count() > 0);
+        }
+    }
+
+    #[test]
+    fn test_code_wrap_flag_emoji() {
+        // 🇺🇸 = 8 bytes, 2 code points. Byte-based slicing splits regional indicators.
+        let line = format!("// {}", "🇺🇸".repeat(15));
+        assert_eq!(line.chars().count(), 33);
+        assert_eq!(line.len(), 123);
+
+        let (_, lines) = code_wrap(&line, 20, true);
+
+        assert!(lines.len() >= 2);
+    }
+
+    #[test]
+    fn test_code_wrap_skin_tone_emoji() {
+        // 👋🏽 = 8 bytes, 2 code points. Byte-based slicing splits base from modifier.
+        let line = format!("// {}", "👋🏽".repeat(15));
+        assert_eq!(line.chars().count(), 33);
+
+        let (_, lines) = code_wrap(&line, 20, true);
+
+        assert!(lines.len() >= 2);
+    }
+
+    #[test]
+    fn test_code_wrap_mixed_multibyte() {
+        // "a═b🎉c" = 10 bytes, 5 chars. Creates tricky non-aligned byte boundaries.
+        let line = "a═b🎉c".repeat(10);
+        assert_eq!(line.len(), 100);
+        assert_eq!(line.chars().count(), 50);
+
+        let (_, lines) = code_wrap(&line, 20, true);
+
+        assert!(lines.len() >= 3);
+        assert_eq!(lines[0].chars().count(), 16);
     }
 }

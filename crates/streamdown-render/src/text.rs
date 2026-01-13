@@ -350,7 +350,97 @@ mod tests {
     fn test_truncate_with_ansi() {
         let text = "\x1b[1mhello\x1b[0m world";
         let truncated = truncate_to_visible(text, 5);
-        // Should preserve ANSI and truncate visible to 5
         assert!(truncated.contains("\x1b["));
+    }
+
+    #[test]
+    fn test_truncate_to_visible_box_drawing() {
+        // ═ is 3 bytes, 1 display column. Byte-based slicing would corrupt.
+        let text = "═══════════";
+        assert_eq!(text.len(), 33);
+        assert_eq!(text.chars().count(), 11);
+
+        let truncated = truncate_to_visible(text, 5);
+
+        assert_eq!(truncated.chars().count(), 5);
+        assert_eq!(truncated, "═════");
+    }
+
+    #[test]
+    fn test_truncate_to_visible_emojis() {
+        // 🎉 = 4 bytes, 2 display columns.
+        let text = "🎉🎉🎉🎉🎉";
+        assert_eq!(text.len(), 20);
+        assert_eq!(text.chars().count(), 5);
+
+        let truncated = truncate_to_visible(text, 4);
+
+        assert_eq!(truncated.chars().count(), 2);
+        assert_eq!(truncated, "🎉🎉");
+    }
+
+    #[test]
+    fn test_truncate_to_visible_zwj_emojis() {
+        // 👨‍💻 = 11 bytes, 3 code points. Should not split ZWJ sequence.
+        let text = format!("{}{}{}", "👨‍💻", "👨‍💻", "👨‍💻");
+        assert_eq!(text.chars().count(), 9);
+
+        let truncated = truncate_to_visible(&text, 4);
+
+        let _ = truncated.chars().count(); // Should not panic
+    }
+
+    #[test]
+    fn test_simple_wrap_cjk() {
+        // CJK: 3 bytes, 2 display columns per char.
+        let text = "你好 世界 你好 世界";
+
+        let lines = simple_wrap(text, 10);
+
+        assert_eq!(lines.len(), 2);
+        for line in &lines {
+            let _ = line.chars().count();
+        }
+    }
+
+    #[test]
+    fn test_simple_wrap_emojis() {
+        // 🎉 = 4 bytes, 2 display columns.
+        let text = "🎉🎉🎉🎉 🎉🎉🎉🎉";
+
+        let lines = simple_wrap(text, 10);
+
+        assert!(lines.len() >= 1);
+    }
+
+    #[test]
+    fn test_text_wrap_mixed_multibyte() {
+        let text = "Hello 你好 ═══ 🎉 world";
+
+        let result = text_wrap(text, 15, 0, "", "", false, false);
+
+        assert!(!result.lines.is_empty());
+    }
+
+    #[test]
+    fn test_split_text_emoji_integrity() {
+        let text = "hello 🎉 world 🌟 test";
+
+        let words = split_text(text);
+
+        assert_eq!(words.len(), 5);
+        assert_eq!(words[1], "🎉");
+        assert_eq!(words[3], "🌟");
+    }
+
+    #[test]
+    fn test_split_text_zwj_emoji() {
+        // ZWJ emoji 👨‍👩‍👧‍👦 should stay together (7 code points).
+        let text = "Family: 👨‍👩‍👧‍👦 done";
+
+        let words = split_text(text);
+
+        assert_eq!(words.len(), 3);
+        assert_eq!(words[1].chars().count(), 7);
     }
 }
