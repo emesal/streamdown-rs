@@ -115,7 +115,8 @@ pub fn render_code_start(
     if let Some(lang) = language {
         if !lang.is_empty() && lang != "text" {
             let label_fg = fg_color(&style.symbol);
-            let padding = width.saturating_sub(lang.len() + 2);
+            let lang_width = unicode_width::UnicodeWidthStr::width(lang);
+            let padding = width.saturating_sub(lang_width + 2);
             lines.push(format!(
                 "{}{}{}[{}]{}{}",
                 left_margin,
@@ -480,5 +481,34 @@ mod tests {
 
         assert!(lines.len() >= 3);
         assert_eq!(lines[0].chars().count(), 16);
+    }
+
+    #[test]
+    fn test_code_block_cjk_language_label() {
+        // BUG: Language label padding uses byte length instead of display width.
+        // CJK language names like "日本語" (9 bytes, 6 display width) get wrong padding.
+        let style = RenderStyle::default();
+        let lang = "日本語"; // 9 bytes, 3 chars, 6 display width
+        let width = 40;
+
+        // With byte-based: padding = 40 - (9 + 2) = 29
+        // With display-based: padding = 40 - (6 + 2) = 32
+        // The difference is 3 extra spaces with byte-based
+
+        let lines = render_code_start(Some(lang), width, "", &style, false);
+
+        // Find the language label line (contains "[日本語]")
+        let label_line = lines.iter().find(|l| l.contains(lang)).expect("Should have language label");
+
+        // The label line should have correct width (40 display width)
+        // Strip ANSI codes and check width
+        let visible = streamdown_ansi::utils::visible(label_line);
+        let visible_width = unicode_width::UnicodeWidthStr::width(visible.as_str());
+
+        assert_eq!(
+            visible_width, width,
+            "Language label line should be exactly {} display width, got {}: {:?}",
+            width, visible_width, visible
+        );
     }
 }
