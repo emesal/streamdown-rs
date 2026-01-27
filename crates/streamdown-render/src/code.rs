@@ -102,35 +102,64 @@ pub fn render_code_start(
     let bg = bg_color(&style.dark);
     let fg = fg_color(&style.grey);
 
+    // Check if we have a language label to embed
+    let lang_label = language
+        .filter(|l| !l.is_empty() && *l != "text")
+        .map(|lang| format!("[{}]", lang));
+
     if pretty_pad {
-        // Pretty top border: ▄▄▄▄▄ (foreground color on dark background)
-        let border = CODEPAD_TOP.to_string().repeat(width);
-        lines.push(format!("{}{}{}{}{}", left_margin, fg, bg, border, RESET));
+        // Pretty top border: ▄▄▄▄▄ with optional language label embedded
+        if let Some(label) = lang_label {
+            let label_fg = fg_color(&style.symbol);
+            let label_width = unicode_width::UnicodeWidthStr::width(label.as_str());
+
+            // First character (column 0)
+            let first_char = CODEPAD_TOP.to_string();
+            // Label starts at column 1 (second position)
+            // Remaining border characters fill the rest
+            let remaining_width = width.saturating_sub(1 + label_width);
+            let remaining_border = CODEPAD_TOP.to_string().repeat(remaining_width);
+
+            lines.push(format!(
+                "{}{}{}{}{}{}{}{}{}",
+                left_margin,
+                fg,
+                bg,
+                first_char,
+                label_fg,
+                label,
+                fg,
+                remaining_border,
+                RESET
+            ));
+        } else {
+            // No language label, just border
+            let border = CODEPAD_TOP.to_string().repeat(width);
+            lines.push(format!("{}{}{}{}{}", left_margin, fg, bg, border, RESET));
+        }
     } else {
         // Simple border with spaces (copy-paste friendly)
-        lines.push(format!(
-            "{}{}{}{}",
-            left_margin,
-            bg,
-            " ".repeat(width),
-            RESET
-        ));
-    }
-
-    // Language label if provided
-    if let Some(lang) = language {
-        if !lang.is_empty() && lang != "text" {
+        if let Some(label) = lang_label {
             let label_fg = fg_color(&style.symbol);
-            let lang_width = unicode_width::UnicodeWidthStr::width(lang);
-            let padding = width.saturating_sub(lang_width + 2);
+            let label_width = unicode_width::UnicodeWidthStr::width(label.as_str());
+            let padding = width.saturating_sub(1 + label_width);
+
             lines.push(format!(
-                "{}{}{}[{}]{}{}{}",
+                "{}{} {}{}{}{}{}",
                 left_margin,
                 bg,
                 label_fg,
-                lang,
+                label,
                 bg,
                 " ".repeat(padding),
+                RESET
+            ));
+        } else {
+            lines.push(format!(
+                "{}{}{}{}",
+                left_margin,
+                bg,
+                " ".repeat(width),
                 RESET
             ));
         }
