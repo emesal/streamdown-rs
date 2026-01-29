@@ -436,7 +436,7 @@ mod tests {
 
         let (_, lines) = code_wrap(line, 40, true);
 
-        assert!(lines.len() >= 1);
+        assert!(!lines.is_empty());
         for line in &lines {
             assert!(line.chars().count() > 0 || line.is_empty());
         }
