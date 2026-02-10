@@ -996,7 +996,11 @@ mod tests {
         assert!(visible.contains("world"));
         // Should have wrapped
         let lines: Vec<&str> = result.lines().collect();
-        assert!(lines.len() > 1, "expected wrapping with bold, got: {:?}", lines);
+        assert!(
+            lines.len() > 1,
+            "expected wrapping with bold, got: {:?}",
+            lines
+        );
     }
 
     #[test]
