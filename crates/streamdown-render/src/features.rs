@@ -166,7 +166,7 @@ pub struct RenderFeatures {
     /// Enable savebrace (save code to temp file)
     pub savebrace: bool,
 
-    /// Allow terminal to handle line wrapping
+    /// Word-wrap inline text at terminal width (breaks on word boundaries)
     pub width_wrap: bool,
 
     /// Fixed width (None = auto-detect from terminal)

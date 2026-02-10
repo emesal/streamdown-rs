@@ -186,6 +186,10 @@ pub struct Renderer<W: Write> {
     in_blockquote: bool,
     /// Blockquote depth
     blockquote_depth: usize,
+    /// Buffer for inline content when word wrapping is enabled.
+    /// Inline events (Text, Bold, etc.) accumulate here and are flushed
+    /// through `text_wrap` on Newline/EmptyLine/block boundaries.
+    inline_buffer: String,
 }
 
 impl<W: Write> Renderer<W> {
@@ -204,6 +208,7 @@ impl<W: Write> Renderer<W> {
             list_state: ListState::new(),
             in_blockquote: false,
             blockquote_depth: 0,
+            inline_buffer: String::new(),
         }
     }
 
@@ -298,6 +303,48 @@ impl<W: Write> Renderer<W> {
         Ok(())
     }
 
+    /// Buffer inline content for word wrapping, or write directly if wrapping is off.
+    fn write_inline(&mut self, s: &str) -> std::io::Result<()> {
+        if self.features.width_wrap {
+            self.inline_buffer.push_str(s);
+            Ok(())
+        } else {
+            self.write(s)
+        }
+    }
+
+    /// Flush the inline buffer through word wrapping and write the result.
+    /// No-op if the buffer is empty or wrapping is disabled.
+    fn flush_inline(&mut self) -> std::io::Result<()> {
+        if !self.features.width_wrap || self.inline_buffer.is_empty() {
+            return Ok(());
+        }
+
+        let text = std::mem::take(&mut self.inline_buffer);
+        let margin = self.left_margin();
+        let wrapped = text_wrap(
+            &text,
+            self.current_width(),
+            0,
+            &margin,
+            &margin,
+            false,
+            false,
+        );
+
+        for (i, line) in wrapped.lines.iter().enumerate() {
+            if i < wrapped.lines.len() - 1 {
+                self.writeln(line)?;
+            } else {
+                // Last line: write without newline so Newline event handles it
+                self.write(line)?;
+                self.column = streamdown_ansi::utils::visible_length(line);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Render a single parse event.
     pub fn render_event(&mut self, event: &ParseEvent) -> std::io::Result<()> {
         match event {
@@ -305,36 +352,38 @@ impl<W: Write> Renderer<W> {
             ParseEvent::Text(text) => {
                 // Decode HTML entities like &copy; -> ©
                 let decoded = streamdown_parser::decode_html_entities(text);
-                self.write(&decoded)?;
-                self.column += streamdown_ansi::utils::visible_length(&decoded);
+                self.write_inline(&decoded)?;
+                if !self.features.width_wrap {
+                    self.column += streamdown_ansi::utils::visible_length(&decoded);
+                }
             }
 
             ParseEvent::InlineCode(code) => {
                 let bg = bg_color(&self.style.code_bg);
-                self.write(&format!("{}{} {} {}", bg, DIM_ON, code, RESET))?;
+                self.write_inline(&format!("{}{} {} {}", bg, DIM_ON, code, RESET))?;
             }
 
             ParseEvent::Bold(text) => {
-                self.write(&format!("{}{}{}", BOLD_ON, text, BOLD_OFF))?;
+                self.write_inline(&format!("{}{}{}", BOLD_ON, text, BOLD_OFF))?;
             }
 
             ParseEvent::Italic(text) => {
-                self.write(&format!("{}{}{}", ITALIC_ON, text, ITALIC_OFF))?;
+                self.write_inline(&format!("{}{}{}", ITALIC_ON, text, ITALIC_OFF))?;
             }
 
             ParseEvent::BoldItalic(text) => {
-                self.write(&format!(
+                self.write_inline(&format!(
                     "{}{}{}{}{}",
                     BOLD_ON, ITALIC_ON, text, ITALIC_OFF, BOLD_OFF
                 ))?;
             }
 
             ParseEvent::Underline(text) => {
-                self.write(&format!("{}{}{}", UNDERLINE_ON, text, UNDERLINE_OFF))?;
+                self.write_inline(&format!("{}{}{}", UNDERLINE_ON, text, UNDERLINE_OFF))?;
             }
 
             ParseEvent::Strikeout(text) => {
-                self.write(&format!("{}{}{}", STRIKEOUT_ON, text, STRIKEOUT_OFF))?;
+                self.write_inline(&format!("{}{}{}", STRIKEOUT_ON, text, STRIKEOUT_OFF))?;
             }
 
             ParseEvent::Link { text, url } => {
@@ -342,33 +391,32 @@ impl<W: Write> Renderer<W> {
                 // Also include OSC 8 hyperlink for terminals that support it
                 let fg = fg_color(&self.style.link_url);
 
-                // OSC 8 start
-                self.write("\x1b]8;;")?;
-                self.write(url)?;
-                self.write("\x1b\\")?;
-
-                // Underlined text
-                self.write(&format!("{}{}{}", UNDERLINE_ON, text, UNDERLINE_OFF))?;
-
-                // OSC 8 end
-                self.write("\x1b]8;;\x1b\\")?;
-
-                // Show URL in parentheses (dimmed)
-                self.write(&format!(" {}({}){}", fg, url, RESET))?;
+                // OSC 8 start + underlined text + OSC 8 end + URL display
+                // Buffer as single unit so wrapping treats it atomically
+                let mut link_str = String::new();
+                link_str.push_str("\x1b]8;;");
+                link_str.push_str(url);
+                link_str.push_str("\x1b\\");
+                link_str.push_str(&format!("{}{}{}", UNDERLINE_ON, text, UNDERLINE_OFF));
+                link_str.push_str("\x1b]8;;\x1b\\");
+                link_str.push_str(&format!(" {}({}){}", fg, url, RESET));
+                self.write_inline(&link_str)?;
             }
 
             ParseEvent::Image { alt, url: _ } => {
                 let fg = fg_color(&self.style.image_marker);
-                self.write(&format!("{}[\u{1F5BC} {}]{}", fg, alt, RESET))?;
+                self.write_inline(&format!("{}[\u{1F5BC} {}]{}", fg, alt, RESET))?;
             }
 
             ParseEvent::Footnote(superscript) => {
                 let fg = fg_color(&self.style.footnote);
-                self.write(&format!("{}{}{}", fg, superscript, RESET))?;
+                self.write_inline(&format!("{}{}{}", fg, superscript, RESET))?;
             }
 
             // === Block elements ===
+            // Flush any buffered inline content before block-level elements
             ParseEvent::Heading { level, content } => {
+                self.flush_inline()?;
                 let lines = render_heading(
                     *level,
                     content,
@@ -382,6 +430,7 @@ impl<W: Write> Renderer<W> {
             }
 
             ParseEvent::CodeBlockStart { language, .. } => {
+                self.flush_inline()?;
                 self.code_language = language.clone();
                 self.code_buffer.clear();
 
@@ -456,6 +505,7 @@ impl<W: Write> Renderer<W> {
                 bullet,
                 content,
             } => {
+                self.flush_inline()?;
                 let lines = render_list_item(
                     *indent,
                     bullet,
@@ -475,6 +525,7 @@ impl<W: Write> Renderer<W> {
             }
 
             ParseEvent::TableHeader(cells) => {
+                self.flush_inline()?;
                 self.table_state.reset();
                 self.table_state.is_header = true;
 
@@ -515,6 +566,7 @@ impl<W: Write> Renderer<W> {
             }
 
             ParseEvent::BlockquoteStart { depth } => {
+                self.flush_inline()?;
                 self.in_blockquote = true;
                 self.blockquote_depth = *depth;
             }
@@ -542,6 +594,7 @@ impl<W: Write> Renderer<W> {
             }
 
             ParseEvent::ThinkBlockStart => {
+                self.flush_inline()?;
                 let fg = fg_color(&self.style.think_border);
                 self.writeln(&format!("{}┌─ thinking ─{}", fg, RESET))?;
                 self.in_blockquote = true;
@@ -561,16 +614,19 @@ impl<W: Write> Renderer<W> {
             }
 
             ParseEvent::HorizontalRule => {
+                self.flush_inline()?;
                 let fg = fg_color(&self.style.hr);
                 let rule = "─".repeat(self.current_width());
                 self.writeln(&format!("{}{}{}{}", self.left_margin(), fg, rule, RESET))?;
             }
 
             ParseEvent::EmptyLine => {
+                self.flush_inline()?;
                 self.writeln("")?;
             }
 
             ParseEvent::Newline => {
+                self.flush_inline()?;
                 self.writeln("")?;
             }
 
@@ -591,43 +647,45 @@ impl<W: Write> Renderer<W> {
     /// Render an inline element.
     fn render_inline_element(&mut self, element: &InlineElement) -> std::io::Result<()> {
         match element {
-            InlineElement::Text(s) => self.write(s)?,
-            InlineElement::Bold(s) => self.write(&format!("{}{}{}", BOLD_ON, s, BOLD_OFF))?,
-            InlineElement::Italic(s) => self.write(&format!("{}{}{}", ITALIC_ON, s, ITALIC_OFF))?,
-            InlineElement::BoldItalic(s) => self.write(&format!(
+            InlineElement::Text(s) => self.write_inline(s)?,
+            InlineElement::Bold(s) => {
+                self.write_inline(&format!("{}{}{}", BOLD_ON, s, BOLD_OFF))?
+            }
+            InlineElement::Italic(s) => {
+                self.write_inline(&format!("{}{}{}", ITALIC_ON, s, ITALIC_OFF))?
+            }
+            InlineElement::BoldItalic(s) => self.write_inline(&format!(
                 "{}{}{}{}{}",
                 BOLD_ON, ITALIC_ON, s, ITALIC_OFF, BOLD_OFF
             ))?,
             InlineElement::Underline(s) => {
-                self.write(&format!("{}{}{}", UNDERLINE_ON, s, UNDERLINE_OFF))?
+                self.write_inline(&format!("{}{}{}", UNDERLINE_ON, s, UNDERLINE_OFF))?
             }
             InlineElement::Strikeout(s) => {
-                self.write(&format!("{}{}{}", STRIKEOUT_ON, s, STRIKEOUT_OFF))?
+                self.write_inline(&format!("{}{}{}", STRIKEOUT_ON, s, STRIKEOUT_OFF))?
             }
             InlineElement::Code(s) => {
                 let bg = bg_color(&self.style.code_bg);
-                self.write(&format!("{} {} {}", bg, s, RESET))?
+                self.write_inline(&format!("{} {} {}", bg, s, RESET))?
             }
             InlineElement::Link { text, url } => {
                 let fg = fg_color(&self.style.link_url);
-                // OSC 8 start
-                self.write("\x1b]8;;")?;
-                self.write(url)?;
-                self.write("\x1b\\")?;
-                // Underlined text
-                self.write(&format!("{}{}{}", UNDERLINE_ON, text, UNDERLINE_OFF))?;
-                // OSC 8 end
-                self.write("\x1b]8;;\x1b\\")?;
-                // Show URL in parentheses (dimmed)
-                self.write(&format!(" {}({}){}", fg, url, RESET))?;
+                let mut link_str = String::new();
+                link_str.push_str("\x1b]8;;");
+                link_str.push_str(url);
+                link_str.push_str("\x1b\\");
+                link_str.push_str(&format!("{}{}{}", UNDERLINE_ON, text, UNDERLINE_OFF));
+                link_str.push_str("\x1b]8;;\x1b\\");
+                link_str.push_str(&format!(" {}({}){}", fg, url, RESET));
+                self.write_inline(&link_str)?;
             }
             InlineElement::Image { alt, .. } => {
                 let fg = fg_color(&self.style.image_marker);
-                self.write(&format!("{}[\u{1F5BC} {}]{}", fg, alt, RESET))?
+                self.write_inline(&format!("{}[\u{1F5BC} {}]{}", fg, alt, RESET))?
             }
             InlineElement::Footnote(s) => {
                 let fg = fg_color(&self.style.footnote);
-                self.write(&format!("{}{}{}", fg, s, RESET))?
+                self.write_inline(&format!("{}{}{}", fg, s, RESET))?
             }
         }
         Ok(())
@@ -838,6 +896,8 @@ mod tests {
                 url: "https://example.com".to_string(),
             })
             .unwrap();
+        // Flush buffered inline content
+        renderer.render_event(&ParseEvent::Newline).unwrap();
 
         let result = String::from_utf8(output).unwrap();
         assert!(result.contains("Click here"));
@@ -870,5 +930,93 @@ mod tests {
 
         let result = String::from_utf8(output).unwrap();
         assert!(result.contains("Red"));
+    }
+
+    #[test]
+    fn test_word_wrap_long_text() {
+        let mut output = Vec::new();
+        // Narrow width to force wrapping
+        let mut renderer = Renderer::new(&mut output, 20);
+
+        renderer
+            .render_event(&ParseEvent::Text("aaa bbb ccc ddd eee fff".to_string()))
+            .unwrap();
+        renderer.render_event(&ParseEvent::Newline).unwrap();
+
+        let result = String::from_utf8(output).unwrap();
+        let lines: Vec<&str> = result.lines().collect();
+        // Should wrap onto multiple lines rather than one long line
+        assert!(lines.len() > 1, "expected wrapping, got: {:?}", lines);
+        // No line should exceed the width (visible chars only)
+        for line in &lines {
+            let vis = streamdown_ansi::utils::visible_length(line);
+            assert!(vis <= 20, "line too long ({} > 20): {:?}", vis, line);
+        }
+    }
+
+    #[test]
+    fn test_word_wrap_short_text_no_wrap() {
+        let mut output = Vec::new();
+        let mut renderer = Renderer::new(&mut output, 80);
+
+        renderer
+            .render_event(&ParseEvent::Text("short text".to_string()))
+            .unwrap();
+        renderer.render_event(&ParseEvent::Newline).unwrap();
+
+        let result = String::from_utf8(output).unwrap();
+        assert!(
+            result.contains("short text"),
+            "short text should appear unchanged"
+        );
+    }
+
+    #[test]
+    fn test_word_wrap_with_bold() {
+        let mut output = Vec::new();
+        let mut renderer = Renderer::new(&mut output, 20);
+
+        // Simulate: "hello **bold** world again today"
+        renderer
+            .render_event(&ParseEvent::Text("hello ".to_string()))
+            .unwrap();
+        renderer
+            .render_event(&ParseEvent::Bold("bold".to_string()))
+            .unwrap();
+        renderer
+            .render_event(&ParseEvent::Text(" world again today".to_string()))
+            .unwrap();
+        renderer.render_event(&ParseEvent::Newline).unwrap();
+
+        let result = String::from_utf8(output).unwrap();
+        // Content should be present
+        let visible = streamdown_ansi::utils::visible(&result);
+        assert!(visible.contains("hello"));
+        assert!(visible.contains("bold"));
+        assert!(visible.contains("world"));
+        // Should have wrapped
+        let lines: Vec<&str> = result.lines().collect();
+        assert!(lines.len() > 1, "expected wrapping with bold, got: {:?}", lines);
+    }
+
+    #[test]
+    fn test_word_wrap_disabled() {
+        let mut output = Vec::new();
+        let mut features = RenderFeatures::default();
+        features.width_wrap = false;
+        let mut renderer = Renderer::with_features(&mut output, 20, features);
+
+        renderer
+            .render_event(&ParseEvent::Text("aaa bbb ccc ddd eee fff".to_string()))
+            .unwrap();
+        renderer.render_event(&ParseEvent::Newline).unwrap();
+
+        let result = String::from_utf8(output).unwrap();
+        // With wrapping disabled, all text should be on one line (before the newline)
+        assert!(
+            result.starts_with("aaa bbb ccc ddd eee fff"),
+            "wrapping should be disabled, got: {:?}",
+            result
+        );
     }
 }
