@@ -1006,8 +1006,10 @@ mod tests {
     #[test]
     fn test_word_wrap_disabled() {
         let mut output = Vec::new();
-        let mut features = RenderFeatures::default();
-        features.width_wrap = false;
+        let features = RenderFeatures {
+            width_wrap: false,
+            ..Default::default()
+        };
         let mut renderer = Renderer::with_features(&mut output, 20, features);
 
         renderer
