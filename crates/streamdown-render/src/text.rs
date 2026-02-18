@@ -166,20 +166,14 @@ pub fn text_wrap(
                 let mut line_content = format!("{}{}", prefix, current_line);
 
                 // Force truncate if needed
-                if force_truncate {
-                    while visible_length(&line_content) > width && line_content.len() > 1 {
-                        // Remove last visible character and add ellipsis
-                        let visible_part = visible(&line_content);
-                        if visible_part.len() > 1 {
-                            // Find the position to truncate
-                            let target_len = visible_part.len() - 2;
-                            line_content = truncate_to_visible(&line_content, target_len);
-                            line_content.push('…');
-                            truncated = true;
-                        } else {
-                            break;
-                        }
-                    }
+                if force_truncate && visible_length(&line_content) > width {
+                    // Truncate to width-1 columns and add an ellipsis.
+                    // Using visible_length (display columns) avoids the
+                    // byte-vs-width mismatch that caused an infinite loop
+                    // when multi-byte chars (including '…' itself) were present.
+                    line_content = truncate_to_visible(&line_content, width.saturating_sub(1));
+                    line_content.push('…');
+                    truncated = true;
                 }
 
                 // Add resetter and padding
@@ -222,18 +216,10 @@ pub fn text_wrap(
         };
         let mut line_content = format!("{}{}", prefix, current_line);
 
-        if force_truncate {
-            while visible_length(&line_content) > width && line_content.len() > 1 {
-                let visible_part = visible(&line_content);
-                if visible_part.len() > 1 {
-                    let target_len = visible_part.len() - 2;
-                    line_content = truncate_to_visible(&line_content, target_len);
-                    line_content.push('…');
-                    truncated = true;
-                } else {
-                    break;
-                }
-            }
+        if force_truncate && visible_length(&line_content) > width {
+            line_content = truncate_to_visible(&line_content, width.saturating_sub(1));
+            line_content.push('…');
+            truncated = true;
         }
 
         line_content.push_str(resetter);
@@ -456,5 +442,42 @@ mod tests {
 
         assert_eq!(words.len(), 3);
         assert_eq!(words[1].chars().count(), 7);
+    }
+
+    #[test]
+    fn test_force_truncate_terminates_with_multibyte_ellipsis() {
+        // Regression: the old while-loop used visible_part.len() (byte count)
+        // for target_len. Once '…' (3 bytes, 1 display col) was appended,
+        // target_len was too large to shorten the string, causing an infinite loop.
+        // The fix uses width directly so truncation always terminates.
+        let long_word = "supercalifragilistic"; // 20 chars, all ASCII
+        let result = text_wrap(long_word, 8, 0, "", "", true, false);
+        assert!(!result.lines.is_empty());
+        assert!(result.truncated);
+        // Result must fit within width (8 columns)
+        for line in &result.lines {
+            assert!(
+                visible_length(line) <= 8,
+                "line too wide: {:?} ({} cols)",
+                line,
+                visible_length(line)
+            );
+        }
+    }
+
+    #[test]
+    fn test_force_truncate_terminates_with_multibyte_content() {
+        // '═' is 3 bytes, 1 display column — same class of bug.
+        let wide_text = "═══════════════════"; // 19 box-drawing chars
+        let result = text_wrap(wide_text, 8, 0, "", "", true, false);
+        assert!(!result.lines.is_empty());
+        for line in &result.lines {
+            assert!(
+                visible_length(line) <= 8,
+                "line too wide: {:?} ({} cols)",
+                line,
+                visible_length(line)
+            );
+        }
     }
 }
