@@ -178,7 +178,9 @@ pub fn text_wrap(
             width.saturating_sub(next_prefix_width)
         };
 
-        if word_visible_len > 0 && line_visible_len + word_visible_len + space_needed <= effective_width {
+        if word_visible_len > 0
+            && line_visible_len + word_visible_len + space_needed <= effective_width
+        {
             // Word fits (trailing space is part of the word from split_text)
             current_line.push_str(word);
         } else if word_visible_len > 0 {
@@ -516,8 +518,14 @@ mod tests {
         // OSC sequences must not be split mid-sequence; each word may contain ANSI
         let joined = words.join(" ");
         // The OSC sequences must be preserved intact (not split by whitespace scanning)
-        assert!(joined.contains("\x1b]8;;https://example.com\x1b\\"), "opening OSC sequence must be preserved");
-        assert!(joined.contains("\x1b]8;;\x1b\\"), "closing OSC sequence must be preserved");
+        assert!(
+            joined.contains("\x1b]8;;https://example.com\x1b\\"),
+            "opening OSC sequence must be preserved"
+        );
+        assert!(
+            joined.contains("\x1b]8;;\x1b\\"),
+            "closing OSC sequence must be preserved"
+        );
     }
 
     #[test]
@@ -545,7 +553,9 @@ mod tests {
             assert!(
                 total <= width,
                 "line is {} cols wide, exceeds width {}: {:?}",
-                total, width, line
+                total,
+                width,
+                line
             );
         }
     }

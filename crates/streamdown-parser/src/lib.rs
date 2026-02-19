@@ -1203,7 +1203,9 @@ mod tests {
         // Drop to depth 1 — must emit BlockquoteEnd (and new BlockquoteStart)
         let events = parser.parse_line("> shallow");
         assert!(
-            events.iter().any(|e| matches!(e, ParseEvent::BlockquoteEnd)),
+            events
+                .iter()
+                .any(|e| matches!(e, ParseEvent::BlockquoteEnd)),
             "decreasing blockquote depth should emit BlockquoteEnd"
         );
     }

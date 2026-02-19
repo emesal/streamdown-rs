@@ -101,7 +101,10 @@ fn load_config(cli: &Cli) -> io::Result<Config> {
                     debug!("Merged config from file: {}", config_arg);
                 }
                 Err(e) => {
-                    eprintln!("streamdown: failed to load config file {}: {}", config_arg, e);
+                    eprintln!(
+                        "streamdown: failed to load config file {}: {}",
+                        config_arg, e
+                    );
                 }
             }
         } else {
@@ -121,7 +124,10 @@ fn load_config(cli: &Cli) -> io::Result<Config> {
     // Apply HSV base if provided
     if let Some((h, s, v)) = cli.parse_base() {
         debug!("Setting HSV base: {}, {}, {}", h, s, v);
-        eprintln!("warning: --base HSV colour override is not yet implemented (got {}, {}, {})", h, s, v);
+        eprintln!(
+            "warning: --base HSV colour override is not yet implemented (got {}, {}, {})",
+            h, s, v
+        );
     }
 
     Ok(config)
@@ -515,10 +521,8 @@ fn emit_line<W: Write>(
 
 /// Scrape code blocks to a directory.
 fn scrape_code(event: &ParseEvent, scrape_dir: &Path) -> io::Result<()> {
-    static CODE_COUNTER: std::sync::atomic::AtomicUsize =
-        std::sync::atomic::AtomicUsize::new(0);
-    static CURRENT_FILE: std::sync::Mutex<Option<std::path::PathBuf>> =
-        std::sync::Mutex::new(None);
+    static CODE_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static CURRENT_FILE: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
 
     match event {
         ParseEvent::CodeBlockStart { language, .. } => {
@@ -526,7 +530,11 @@ fn scrape_code(event: &ParseEvent, scrape_dir: &Path) -> io::Result<()> {
             let counter = CODE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let raw_ext = language.as_deref().unwrap_or("txt");
             let ext = streamdown_ansi::sanitize::sanitize_extension(raw_ext);
-            let ext = if ext.is_empty() { "txt".to_string() } else { ext };
+            let ext = if ext.is_empty() {
+                "txt".to_string()
+            } else {
+                ext
+            };
             let filename = format!("code_{:08}.{}", counter % 100_000_000, ext);
             let path = scrape_dir.join(&filename);
             debug!("Scraping code to: {}", path.display());
