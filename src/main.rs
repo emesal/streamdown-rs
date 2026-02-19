@@ -101,7 +101,7 @@ fn load_config(cli: &Cli) -> io::Result<Config> {
                     debug!("Merged config from file: {}", config_arg);
                 }
                 Err(e) => {
-                    error!("Failed to load config file {}: {}", config_arg, e);
+                    eprintln!("streamdown: failed to load config file {}: {}", config_arg, e);
                 }
             }
         } else {
@@ -112,7 +112,7 @@ fn load_config(cli: &Cli) -> io::Result<Config> {
                     debug!("Merged inline config");
                 }
                 Err(e) => {
-                    error!("Failed to parse config: {}", e);
+                    eprintln!("streamdown: failed to parse --config value: {}", e);
                 }
             }
         }
@@ -121,7 +121,7 @@ fn load_config(cli: &Cli) -> io::Result<Config> {
     // Apply HSV base if provided
     if let Some((h, s, v)) = cli.parse_base() {
         debug!("Setting HSV base: {}, {}, {}", h, s, v);
-        // TODO: Apply HSV base to computed style
+        eprintln!("warning: --base HSV colour override is not yet implemented (got {}, {}, {})", h, s, v);
     }
 
     Ok(config)
@@ -515,51 +515,33 @@ fn emit_line<W: Write>(
 
 /// Scrape code blocks to a directory.
 fn scrape_code(event: &ParseEvent, scrape_dir: &Path) -> io::Result<()> {
-    static CODE_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static CODE_COUNTER: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
+    static CURRENT_FILE: std::sync::Mutex<Option<std::path::PathBuf>> =
+        std::sync::Mutex::new(None);
 
     match event {
         ParseEvent::CodeBlockStart { language, .. } => {
-            // Create scrape directory if needed
             std::fs::create_dir_all(scrape_dir)?;
-
             let counter = CODE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let raw_ext = language.as_deref().unwrap_or("txt");
-            // Sanitize extension to prevent path traversal attacks
             let ext = streamdown_ansi::sanitize::sanitize_extension(raw_ext);
-            let ext = if ext.is_empty() {
-                "txt".to_string()
-            } else {
-                ext
-            };
-            // Use modulo to prevent filename overflow with large counters
+            let ext = if ext.is_empty() { "txt".to_string() } else { ext };
             let filename = format!("code_{:08}.{}", counter % 100_000_000, ext);
             let path = scrape_dir.join(&filename);
-
             debug!("Scraping code to: {}", path.display());
-
-            // Create empty file (will be appended to)
             File::create(&path)?;
+            *CURRENT_FILE.lock().unwrap() = Some(path);
         }
         ParseEvent::CodeBlockLine(line) => {
-            // Append to the most recent code file
-            let counter = CODE_COUNTER.load(std::sync::atomic::Ordering::SeqCst);
-            if counter > 0 {
-                // Find the file
-                for entry in std::fs::read_dir(scrape_dir)? {
-                    let entry = entry?;
-                    let name = entry.file_name();
-                    if name
-                        .to_string_lossy()
-                        .starts_with(&format!("code_{:08}", (counter - 1) % 100_000_000))
-                    {
-                        let mut file = std::fs::OpenOptions::new()
-                            .append(true)
-                            .open(entry.path())?;
-                        writeln!(file, "{}", line)?;
-                        break;
-                    }
-                }
+            let guard = CURRENT_FILE.lock().unwrap();
+            if let Some(ref path) = *guard {
+                let mut file = std::fs::OpenOptions::new().append(true).open(path)?;
+                writeln!(file, "{}", line)?;
             }
+        }
+        ParseEvent::CodeBlockEnd => {
+            *CURRENT_FILE.lock().unwrap() = None;
         }
         _ => {}
     }
