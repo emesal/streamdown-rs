@@ -295,8 +295,8 @@ fn run_exec(
     let mut plugin_manager = PluginManager::with_builtins();
     let parse_state = streamdown_core::state::ParseState::new();
 
-    // Line buffer for accumulating output
-    let mut line_buffer = String::new();
+    // Line buffer for accumulating raw bytes (decoded as UTF-8 on newline)
+    let mut line_buffer: Vec<u8> = Vec::new();
     let timeout = Duration::from_millis(100);
 
     // Main loop
@@ -364,10 +364,11 @@ fn run_exec(
             PollResult::Timeout => {
                 // Check if there's a partial line that might be a prompt
                 if !line_buffer.is_empty() {
-                    let visible = streamdown_ansi::utils::visible(&line_buffer);
+                    let partial = String::from_utf8_lossy(&line_buffer);
+                    let visible = streamdown_ansi::utils::visible(&partial);
                     if prompt_regex.is_match(&visible) {
                         // This looks like a prompt, emit it directly
-                        print!("{}", line_buffer);
+                        print!("{}", partial);
                         io::stdout().flush()?;
                         line_buffer.clear();
                     }
@@ -381,7 +382,7 @@ fn run_exec(
 
     // Flush remaining content
     if !line_buffer.is_empty() {
-        println!("{}", line_buffer);
+        println!("{}", String::from_utf8_lossy(&line_buffer));
     }
 
     let plugin_output = plugin_manager.flush();
@@ -402,7 +403,7 @@ fn run_exec(
 #[allow(clippy::too_many_arguments)]
 fn process_master_output(
     session: &mut pty::PtySession,
-    line_buffer: &mut String,
+    line_buffer: &mut Vec<u8>,
     output: &mut Vec<u8>,
     parser: &mut MarkdownParser,
     plugin_manager: &mut PluginManager,
@@ -431,11 +432,12 @@ fn process_master_output(
             continue;
         }
 
-        // Process bytes into lines
+        // Process bytes into lines, accumulating raw bytes and decoding UTF-8 on newline
         for &byte in &buf[..n] {
             if byte == b'\n' {
-                // Complete line
-                let line = std::mem::take(line_buffer);
+                // Complete line — decode accumulated raw bytes as UTF-8
+                let raw = std::mem::take(line_buffer);
+                let line = String::from_utf8_lossy(&raw).into_owned();
                 trace!("PTY line: {}", line);
 
                 // Check for prompt
@@ -477,7 +479,7 @@ fn process_master_output(
             } else if byte == b'\r' {
                 // Ignore carriage returns
             } else {
-                line_buffer.push(byte as char);
+                line_buffer.push(byte);
             }
         }
     }
@@ -603,5 +605,23 @@ mod tests {
 
         assert_eq!(features.fixed_width, Some(100));
         assert!(!features.width_wrap);
+    }
+
+    #[test]
+    fn test_byte_accumulation_utf8() {
+        // Simulate what process_master_output does with UTF-8 bytes
+        // A smiley: 0xF0 0x9F 0x98 0x80 = 😀 (4 bytes)
+        let bytes: &[u8] = "😀".as_bytes();
+        let mut raw: Vec<u8> = Vec::new();
+        for &b in bytes {
+            raw.push(b);
+        }
+        // Decode as UTF-8 — must round-trip correctly
+        let s = String::from_utf8_lossy(&raw);
+        assert_eq!(s, "😀");
+
+        // The buggy approach:
+        let corrupted: String = bytes.iter().map(|&b| b as char).collect();
+        assert_ne!(corrupted, "😀", "byte-as-char corrupts multibyte sequences");
     }
 }
