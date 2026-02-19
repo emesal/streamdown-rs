@@ -1,5 +1,8 @@
 ---
 source: tests/snapshots.rs
+assertion_line: 266
 expression: output
 ---
-This is a long paragraph that should wrap at a narrow width to test the text wrapping functionality.
+This is a long paragraph that should    
+wrap at a narrow width to test the text 
+wrapping functionality.
