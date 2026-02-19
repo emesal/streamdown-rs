@@ -53,8 +53,14 @@ impl TableState {
         let padding_width = num_cols * 2;
         let content_width = available_width.saturating_sub(separator_width + padding_width);
 
-        // Distribute evenly with remainder going to leftmost columns
-        let base_width = (content_width / num_cols).max(MIN_COL_WIDTH);
+        // Distribute evenly with remainder going to leftmost columns.
+        // Only enforce MIN_COL_WIDTH when there's enough space; never overflow available width.
+        let natural_width = content_width / num_cols;
+        let base_width = if natural_width >= MIN_COL_WIDTH {
+            natural_width
+        } else {
+            natural_width.max(1) // at least 1 char per column
+        };
         let remainder = content_width % num_cols;
 
         self.column_widths = (0..num_cols)
@@ -206,6 +212,18 @@ mod tests {
         let state = TableState::new();
         assert!(state.is_header);
         assert!(state.column_widths.is_empty());
+    }
+
+    #[test]
+    fn test_table_does_not_overflow_narrow_terminal() {
+        let mut state = TableState::new();
+        state.calculate_widths(5, 20); // 5 cols, only 20 cols available
+        let total = state.total_width();
+        assert!(
+            total <= 20,
+            "table width {} exceeds available 20 cols",
+            total
+        );
     }
 
     #[test]
