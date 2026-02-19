@@ -423,8 +423,12 @@ impl Parser {
         {
             let end_fence = caps.get(1).map(|m| m.as_str()).unwrap_or("");
             // Match fence type: ``` with ```, </pre> with <pre>
-            let matches = (fence.starts_with('`') && end_fence.starts_with('`'))
-                || (fence.starts_with('~') && end_fence.starts_with('~'))
+            let matches = (fence.starts_with('`')
+                && end_fence.starts_with('`')
+                && end_fence.len() >= fence.len())
+                || (fence.starts_with('~')
+                    && end_fence.starts_with('~')
+                    && end_fence.len() >= fence.len())
                 || (fence == "<pre>" && end_fence == "</pre>");
 
             if matches {
@@ -563,6 +567,10 @@ impl Parser {
                     } else {
                         for _ in depth..self.state.block_depth {
                             self.state.exit_block();
+                        }
+                        self.events.push(ParseEvent::BlockquoteEnd);
+                        if depth > 0 {
+                            self.events.push(ParseEvent::BlockquoteStart { depth });
                         }
                     }
                 }
@@ -1184,6 +1192,44 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, ParseEvent::CodeBlockEnd)),
             "Should have exited code block with only 2-char indent"
+        );
+    }
+
+    #[test]
+    fn test_blockquote_depth_decrease_emits_end() {
+        let mut parser = Parser::new();
+        // Enter depth 3
+        parser.parse_line(">>> deep");
+        // Drop to depth 1 — must emit BlockquoteEnd (and new BlockquoteStart)
+        let events = parser.parse_line("> shallow");
+        assert!(
+            events.iter().any(|e| matches!(e, ParseEvent::BlockquoteEnd)),
+            "decreasing blockquote depth should emit BlockquoteEnd"
+        );
+    }
+
+    #[test]
+    fn test_code_fence_requires_matching_length() {
+        let mut parser = Parser::new();
+        // Open with 5 backticks
+        parser.parse_line("`````");
+        // A line with 3 backticks should NOT close a 5-backtick fence
+        let events = parser.parse_line("```");
+        assert!(
+            !events.iter().any(|e| matches!(e, ParseEvent::CodeBlockEnd)),
+            "3-backtick line should not close a 5-backtick fence"
+        );
+    }
+
+    #[test]
+    fn test_code_fence_closes_with_equal_or_more_backticks() {
+        let mut parser = Parser::new();
+        parser.parse_line("```");
+        // Exactly 3 backticks should close it
+        let events = parser.parse_line("```");
+        assert!(
+            events.iter().any(|e| matches!(e, ParseEvent::CodeBlockEnd)),
+            "3-backtick line should close a 3-backtick fence"
         );
     }
 }
