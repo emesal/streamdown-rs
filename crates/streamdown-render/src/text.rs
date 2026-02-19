@@ -39,28 +39,57 @@ impl WrappedText {
 /// Split text into words while preserving ANSI codes.
 ///
 /// This is smarter than a simple split - it keeps ANSI codes attached
-/// to the words they modify and handles CJK characters specially.
+/// to the words they modify and handles CSI (SGR) and OSC sequences correctly.
 pub fn split_text(text: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut current = String::new();
-    let mut in_escape = false;
-    let mut escape_buf = String::new();
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
 
-    for ch in text.chars() {
-        if in_escape {
-            escape_buf.push(ch);
-            if ch == 'm' {
-                // End of ANSI sequence
-                current.push_str(&escape_buf);
-                escape_buf.clear();
-                in_escape = false;
-            }
-            continue;
-        }
+    while i < chars.len() {
+        let ch = chars[i];
 
         if ch == '\x1b' {
-            in_escape = true;
-            escape_buf.push(ch);
+            // Peek at next char to determine sequence type
+            let next = chars.get(i + 1).copied();
+            match next {
+                Some('[') => {
+                    // CSI sequence: \x1b[ ... letter
+                    current.push(ch);
+                    i += 1;
+                    while i < chars.len() {
+                        let c = chars[i];
+                        current.push(c);
+                        i += 1;
+                        if c.is_ascii_alphabetic() {
+                            break;
+                        }
+                    }
+                }
+                Some(']') => {
+                    // OSC sequence: \x1b] ... ST  where ST is \x1b\\ or BEL (\x07)
+                    current.push(ch);
+                    i += 1;
+                    while i < chars.len() {
+                        let c = chars[i];
+                        current.push(c);
+                        i += 1;
+                        if c == '\x07' {
+                            break; // BEL terminator
+                        }
+                        if c == '\x1b' && chars.get(i).copied() == Some('\\') {
+                            current.push('\\');
+                            i += 1;
+                            break; // ST terminator
+                        }
+                    }
+                }
+                _ => {
+                    // Unknown escape — pass through single char
+                    current.push(ch);
+                    i += 1;
+                }
+            }
             continue;
         }
 
@@ -68,14 +97,11 @@ pub fn split_text(text: &str) -> Vec<String> {
             if !current.is_empty() {
                 words.push(std::mem::take(&mut current));
             }
+            i += 1;
         } else {
             current.push(ch);
+            i += 1;
         }
-    }
-
-    // Don't forget trailing escape sequence
-    if !escape_buf.is_empty() {
-        current.push_str(&escape_buf);
     }
 
     if !current.is_empty() {
@@ -479,5 +505,17 @@ mod tests {
                 visible_length(line)
             );
         }
+    }
+
+    #[test]
+    fn test_split_text_preserves_osc_hyperlink() {
+        // OSC 8 hyperlink: \x1b]8;;url\x1b\\ + text + \x1b]8;;\x1b\\
+        let link = "\x1b]8;;https://example.com\x1b\\Click here\x1b]8;;\x1b\\";
+        let words = split_text(link);
+        // OSC sequences must not be split mid-sequence; each word may contain ANSI
+        let joined = words.join(" ");
+        // The OSC sequences must be preserved intact (not split by whitespace scanning)
+        assert!(joined.contains("\x1b]8;;https://example.com\x1b\\"), "opening OSC sequence must be preserved");
+        assert!(joined.contains("\x1b]8;;\x1b\\"), "closing OSC sequence must be preserved");
     }
 }
