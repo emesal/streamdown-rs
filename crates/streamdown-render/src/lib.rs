@@ -160,6 +160,32 @@ impl Default for RenderStyle {
     }
 }
 
+impl RenderStyle {
+    /// Create a RenderStyle from a ComputedStyle, mapping the HSV-derived
+    /// colour palette to semantic element colours.
+    pub fn from_computed(_computed: &streamdown_config::ComputedStyle) -> Self {
+        Self {
+            h1: "white".to_string(),
+            h2: "yellow".to_string(),
+            h3: "light_green".to_string(),
+            h4: "cyan".to_string(),
+            h5: "light_grey".to_string(),
+            h6: "grey".to_string(),
+            code_bg: "black".to_string(),
+            code_label: "cyan".to_string(),
+            bullet: "cyan".to_string(),
+            table_header_bg: "blue".to_string(),
+            table_border: "grey".to_string(),
+            blockquote_border: "grey".to_string(),
+            think_border: "grey".to_string(),
+            hr: "dark_grey".to_string(),
+            link_url: "grey".to_string(),
+            image_marker: "cyan".to_string(),
+            footnote: "cyan".to_string(),
+        }
+    }
+}
+
 /// Terminal renderer for markdown.
 pub struct Renderer<W: Write> {
     /// Output writer

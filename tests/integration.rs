@@ -517,13 +517,23 @@ fn test_render_with_custom_style() {
     let mut output = Vec::new();
 
     let style = RenderStyle {
-        bright: "#ff0000".to_string(),
-        head: "#00ff00".to_string(),
-        symbol: "#0000ff".to_string(),
-        grey: "#888888".to_string(),
-        dark: "#111111".to_string(),
-        mid: "#333333".to_string(),
-        light: "#555555".to_string(),
+        h1: "#ff0000".to_string(),
+        h2: "#00ff00".to_string(),
+        h3: "#0000ff".to_string(),
+        h4: "#888888".to_string(),
+        h5: "#111111".to_string(),
+        h6: "#333333".to_string(),
+        code_bg: "#555555".to_string(),
+        code_label: "#ffffff".to_string(),
+        bullet: "#ff0000".to_string(),
+        table_header_bg: "#000000".to_string(),
+        table_border: "#888888".to_string(),
+        blockquote_border: "#888888".to_string(),
+        think_border: "#888888".to_string(),
+        hr: "#888888".to_string(),
+        link_url: "#888888".to_string(),
+        image_marker: "#ffffff".to_string(),
+        footnote: "#ffffff".to_string(),
     };
 
     {

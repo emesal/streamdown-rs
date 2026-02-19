@@ -29,22 +29,24 @@ print(greet("World"))
 "#;
 
     // Create a custom style with different colors
-    // Colors are in "r;g;bm" format for ANSI sequences
     let custom_style = RenderStyle {
-        // Bright cyan for emphasis
-        bright: "0;255;255".to_string(),
-        // Green for headings
-        head: "0;255;128".to_string(),
-        // Yellow for symbols/bullets
-        symbol: "255;255;0".to_string(),
-        // Gray for muted text
-        grey: "128;128;128".to_string(),
-        // Dark blue for backgrounds
-        dark: "20;20;60".to_string(),
-        // Medium purple
-        mid: "80;60;120".to_string(),
-        // Light lavender
-        light: "180;160;220".to_string(),
+        h1: "#00ff80".to_string(),
+        h2: "#00ff80".to_string(),
+        h3: "#00ff80".to_string(),
+        h4: "#00ff80".to_string(),
+        h5: "#00ff80".to_string(),
+        h6: "#808080".to_string(),
+        code_bg: "#14143c".to_string(),
+        code_label: "#00ffff".to_string(),
+        bullet: "#ffff00".to_string(),
+        table_header_bg: "#14143c".to_string(),
+        table_border: "#808080".to_string(),
+        blockquote_border: "#808080".to_string(),
+        think_border: "#808080".to_string(),
+        hr: "#808080".to_string(),
+        link_url: "#b4a0dc".to_string(),
+        image_marker: "#00ffff".to_string(),
+        footnote: "#00ffff".to_string(),
     };
 
     // Create output buffer
@@ -54,9 +56,7 @@ print(greet("World"))
     let mut parser = Parser::new();
 
     // Get terminal width
-    let width = terminal_size::terminal_size()
-        .map(|(w, _)| w.0 as usize)
-        .unwrap_or(80);
+    let width = streamdown_render::terminal_width();
 
     {
         // Create renderer with custom style
