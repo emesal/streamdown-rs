@@ -196,13 +196,13 @@ pub fn parse_sgr_params(code: &str) -> Vec<u32> {
 
 /// Collapse redundant ANSI codes in a sequence.
 ///
-/// This function deduplicates and optimizes ANSI escape sequences,
-/// removing redundant codes and combining compatible ones.
+/// Deduplicates and preserves ANSI escape sequences, including truecolor,
+/// 256-color, legacy 16-color, and text attributes. Unknown codes pass through.
 ///
 /// # Arguments
 ///
 /// * `code_list` - List of ANSI codes applied in order
-/// * `inp` - The input text (for context)
+/// * `_inp` - Unused (reserved for context-aware optimizations)
 ///
 /// # Returns
 ///
@@ -222,110 +222,94 @@ pub fn parse_sgr_params(code: &str) -> Vec<u32> {
 /// // Should have fewer codes after optimization
 /// ```
 pub fn ansi_collapse(code_list: &[String], _inp: &str) -> Vec<String> {
-    // Track current state
-    let mut bold = false;
-    let mut italic = false;
-    let mut underline = false;
-    let mut strikeout = false;
-    let mut dim = false;
-    let mut fg_color: Option<String> = None;
-    let mut bg_color: Option<String> = None;
+    if code_list.is_empty() {
+        return Vec::new();
+    }
 
-    // Process each code and update state
-    for code in code_list {
+    // Find the last reset code index — codes before it are moot.
+    let last_reset = code_list.iter().rposition(|c| {
+        let params = parse_sgr_params(c);
+        params == vec![0]
+    });
+
+    // Only keep codes after the last reset (or all codes if no reset).
+    let effective: &[String] = if let Some(reset_idx) = last_reset {
+        &code_list[reset_idx + 1..]
+    } else {
+        code_list
+    };
+
+    // Deduplicate: for codes we understand, keep only the last one of each category.
+    // For anything else, pass through.
+    let mut bold: Option<String> = None;
+    let mut dim: Option<String> = None;
+    let mut italic: Option<String> = None;
+    let mut underline: Option<String> = None;
+    let mut strikeout: Option<String> = None;
+    let mut fg: Option<String> = None;
+    let mut bg: Option<String> = None;
+    let mut passthrough: Vec<String> = Vec::new();
+
+    for code in effective {
         let params = parse_sgr_params(code);
-
-        let mut i = 0;
-        while i < params.len() {
-            match params[i] {
-                0 => {
-                    // Reset all
-                    bold = false;
-                    italic = false;
-                    underline = false;
-                    strikeout = false;
-                    dim = false;
-                    fg_color = None;
-                    bg_color = None;
-                }
-                1 => bold = true,
-                2 => dim = true,
-                3 => italic = true,
-                4 => underline = true,
-                9 => strikeout = true,
-                22 => {
-                    bold = false;
-                    dim = false;
-                }
-                23 => italic = false,
-                24 => underline = false,
-                29 => strikeout = false,
-                38 => {
-                    // Foreground color
-                    if i + 4 < params.len() && params[i + 1] == 2 {
-                        fg_color = Some(format!(
-                            "\x1b[38;2;{};{};{}m",
-                            params[i + 2],
-                            params[i + 3],
-                            params[i + 4]
-                        ));
-                        i += 4;
-                    }
-                }
-                39 => fg_color = None, // Reset foreground
-                48 => {
-                    // Background color
-                    if i + 4 < params.len() && params[i + 1] == 2 {
-                        bg_color = Some(format!(
-                            "\x1b[48;2;{};{};{}m",
-                            params[i + 2],
-                            params[i + 3],
-                            params[i + 4]
-                        ));
-                        i += 4;
-                    }
-                }
-                49 => bg_color = None, // Reset background
-                _ => {}
+        if params.is_empty() {
+            continue;
+        }
+        match params[0] {
+            0 => { /* reset — already handled above */ }
+            1 => bold = Some(code.clone()),
+            2 => dim = Some(code.clone()),
+            3 => italic = Some(code.clone()),
+            4 => underline = Some(code.clone()),
+            9 => strikeout = Some(code.clone()),
+            22 => {
+                bold = None;
+                dim = None;
             }
-            i += 1;
+            23 => italic = None,
+            24 => underline = None,
+            29 => strikeout = None,
+            38 => fg = Some(code.clone()), // both 38;2 (truecolor) and 38;5 (256-color)
+            39 => fg = None,
+            48 => bg = Some(code.clone()), // both 48;2 (truecolor) and 48;5 (256-color)
+            49 => bg = None,
+            // Legacy 16-color foreground (30-37, 90-97)
+            30..=37 | 90..=97 => fg = Some(code.clone()),
+            // Legacy 16-color background (40-47, 100-107)
+            40..=47 | 100..=107 => bg = Some(code.clone()),
+            // Everything else: blink, reverse, conceal, etc. — pass through
+            _ => passthrough.push(code.clone()),
         }
     }
 
-    // Rebuild minimal code list from final state
     let mut result = Vec::new();
-
-    // Build combined SGR if we have multiple simple attributes
-    let mut sgr_parts = Vec::new();
-
-    if bold {
-        sgr_parts.push("1");
+    // Collect known text attributes into a combined SGR
+    let mut attrs: Vec<&str> = Vec::new();
+    if bold.is_some() {
+        attrs.push("1");
     }
-    if dim {
-        sgr_parts.push("2");
+    if dim.is_some() {
+        attrs.push("2");
     }
-    if italic {
-        sgr_parts.push("3");
+    if italic.is_some() {
+        attrs.push("3");
     }
-    if underline {
-        sgr_parts.push("4");
+    if underline.is_some() {
+        attrs.push("4");
     }
-    if strikeout {
-        sgr_parts.push("9");
+    if strikeout.is_some() {
+        attrs.push("9");
     }
-
-    if !sgr_parts.is_empty() {
-        result.push(format!("\x1b[{}m", sgr_parts.join(";")));
+    if !attrs.is_empty() {
+        result.push(format!("\x1b[{}m", attrs.join(";")));
     }
-
-    // Add colors separately (they're longer)
-    if let Some(ref fg) = fg_color {
-        result.push(fg.clone());
+    if let Some(c) = fg {
+        result.push(c);
     }
-    if let Some(ref bg) = bg_color {
-        result.push(bg.clone());
+    if let Some(c) = bg {
+        result.push(c);
     }
-
+    result.extend(passthrough);
     result
 }
 
@@ -471,5 +455,28 @@ mod tests {
         let text = "Hello world";
         let lines = wrap_ansi(text, 6);
         assert!(lines.len() >= 2);
+    }
+
+    #[test]
+    fn test_ansi_collapse_preserves_256_color() {
+        // 256-color foreground code
+        let codes = vec!["\x1b[38;5;196m".to_string()]; // bright red
+        let collapsed = ansi_collapse(&codes, "");
+        assert!(
+            collapsed.iter().any(|c| c.contains("38;5;196")),
+            "256-color fg code should be preserved, got: {:?}",
+            collapsed
+        );
+    }
+
+    #[test]
+    fn test_ansi_collapse_preserves_legacy_color() {
+        let codes = vec!["\x1b[31m".to_string()]; // legacy red fg
+        let collapsed = ansi_collapse(&codes, "");
+        assert!(
+            collapsed.iter().any(|c| c == "\x1b[31m"),
+            "legacy color should be preserved, got: {:?}",
+            collapsed
+        );
     }
 }
