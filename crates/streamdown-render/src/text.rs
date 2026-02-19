@@ -5,7 +5,6 @@
 //! formatting options.
 
 use streamdown_ansi::utils::{ansi_collapse, extract_ansi_codes, visible, visible_length};
-use streamdown_parser::tokenizer::cjk_count;
 
 /// Result of wrapping text.
 #[derive(Debug, Clone)]
@@ -94,10 +93,17 @@ pub fn split_text(text: &str) -> Vec<String> {
         }
 
         if ch.is_whitespace() {
+            // Attach trailing whitespace to the preceding word so multi-space
+            // sequences are preserved and text_wrap doesn't need to insert gaps.
+            current.push(ch);
+            i += 1;
+            while i < chars.len() && chars[i].is_whitespace() {
+                current.push(chars[i]);
+                i += 1;
+            }
             if !current.is_empty() {
                 words.push(std::mem::take(&mut current));
             }
-            i += 1;
         } else {
             current.push(ch);
             i += 1;
@@ -136,6 +142,9 @@ pub fn text_wrap(
         return WrappedText::empty();
     }
 
+    let first_prefix_width = visible_length(first_prefix);
+    let next_prefix_width = visible_length(next_prefix);
+
     let words = split_text(text);
     if words.is_empty() {
         return WrappedText::empty();
@@ -146,8 +155,6 @@ pub fn text_wrap(
     let mut current_style: Vec<String> = Vec::new();
     let mut truncated = false;
     let resetter = if preserve_format { "" } else { "\x1b[0m" };
-
-    let mut prev_word = String::new();
 
     for word in words.iter().chain(std::iter::once(&String::new())) {
         // Extract ANSI codes from the word
@@ -161,25 +168,18 @@ pub fn text_wrap(
         let word_visible_len = visible_length(word);
         let line_visible_len = visible_length(&current_line);
 
-        // Check if word fits on current line
-        let space_needed = if current_line.is_empty() || word_visible_len == 0 {
-            0
+        // Space is now part of each word's trailing chars (from split_text),
+        // so no extra gap is inserted here.
+        let space_needed = 0;
+
+        let effective_width = if lines.is_empty() {
+            width.saturating_sub(first_prefix_width)
         } else {
-            1 // space between words
+            width.saturating_sub(next_prefix_width)
         };
 
-        // CJK: no space needed between CJK characters
-        let space_needed = if cjk_count(word) > 0 && cjk_count(&prev_word) > 0 {
-            0
-        } else {
-            space_needed
-        };
-
-        if word_visible_len > 0 && line_visible_len + word_visible_len + space_needed <= width {
-            // Word fits
-            if space_needed > 0 && !current_line.is_empty() {
-                current_line.push(' ');
-            }
+        if word_visible_len > 0 && line_visible_len + word_visible_len + space_needed <= effective_width {
+            // Word fits (trailing space is part of the word from split_text)
             current_line.push_str(word);
         } else if word_visible_len > 0 {
             // Word doesn't fit, finalize current line
@@ -229,8 +229,6 @@ pub fn text_wrap(
             current_style.push(code.clone());
         }
         current_style = ansi_collapse(&current_style, "");
-
-        prev_word = word.clone();
     }
 
     // Don't forget the last line
@@ -329,7 +327,8 @@ mod tests {
     #[test]
     fn test_split_text() {
         let words = split_text("hello world");
-        assert_eq!(words, vec!["hello", "world"]);
+        // Trailing space is attached to the preceding word
+        assert_eq!(words, vec!["hello ", "world"]);
     }
 
     #[test]
@@ -455,8 +454,9 @@ mod tests {
         let words = split_text(text);
 
         assert_eq!(words.len(), 5);
-        assert_eq!(words[1], "🎉");
-        assert_eq!(words[3], "🌟");
+        // Trailing space is attached to the preceding word
+        assert!(words[1].starts_with("🎉"));
+        assert!(words[3].starts_with("🌟"));
     }
 
     #[test]
@@ -467,7 +467,8 @@ mod tests {
         let words = split_text(text);
 
         assert_eq!(words.len(), 3);
-        assert_eq!(words[1].chars().count(), 7);
+        // Trailing space is attached to the preceding word; emoji itself is 7 code points
+        assert!(words[1].starts_with('👨'));
     }
 
     #[test]
@@ -517,5 +518,35 @@ mod tests {
         // The OSC sequences must be preserved intact (not split by whitespace scanning)
         assert!(joined.contains("\x1b]8;;https://example.com\x1b\\"), "opening OSC sequence must be preserved");
         assert!(joined.contains("\x1b]8;;\x1b\\"), "closing OSC sequence must be preserved");
+    }
+
+    #[test]
+    fn test_split_text_preserves_multiple_spaces() {
+        // Two spaces between words should result in two spaces when rejoined
+        let text = "hello  world"; // two spaces
+        let words = split_text(text);
+        // words[0] should end with a space so the rejoined string has two spaces
+        let rejoined = words.join("");
+        assert!(
+            rejoined.contains("  "),
+            "double space should be preserved, got: {:?}",
+            rejoined
+        );
+    }
+
+    #[test]
+    fn test_text_wrap_prefix_does_not_overflow() {
+        let margin = "│ ";
+        let width = 20;
+        let text = "hello world foo bar baz qux";
+        let result = text_wrap(text, width, 0, margin, margin, false, false);
+        for line in &result.lines {
+            let total = visible_length(line);
+            assert!(
+                total <= width,
+                "line is {} cols wide, exceeds width {}: {:?}",
+                total, width, line
+            );
+        }
     }
 }
